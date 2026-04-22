@@ -1,121 +1,194 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import joblib
+import matplotlib.pyplot as plt
 
-# ===============================
+# =========================
 # PAGE CONFIG
-# ===============================
-st.set_page_config(page_title="Global Development Clustering", layout="wide")
+# =========================
+st.set_page_config(page_title="Global Dev Clustering", layout="wide")
 
-st.title("🌍 Global Development Clustering Dashboard")
+# =========================
+# CUSTOM DARK UI
+# =========================
+st.markdown("""
+<style>
+.main {
+    background-color: #0f172a;
+    color: white;
+}
+.block-container {
+    padding: 2rem;
+}
+.card {
+    background-color: #1e293b;
+    padding: 18px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+.metric {
+    font-size: 20px;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ===============================
-# LOAD DATA
-# ===============================
-@st.cache_data
-def load_data():
-    return pd.read_excel("P659_World_development_dataset.xlsx")
+# =========================
+# SIDEBAR
+# =========================
+st.sidebar.title("🌍 Global Dev Clustering")
+st.sidebar.write("Unsupervised ML Project")
 
-df = load_data()
+uploaded_file = st.sidebar.file_uploader("Upload dataset", type=["csv", "xlsx"])
 
-# ===============================
+# =========================
 # LOAD MODELS
-# ===============================
+# =========================
 @st.cache_resource
 def load_models():
-    model = joblib.load("kmeans_model.joblib")
     scaler = joblib.load("scaler.joblib")
     pca = joblib.load("pca.joblib")
-    return model, scaler, pca
+    kmeans = joblib.load("kmeans.joblib")
+    columns = joblib.load("columns.joblib")
+    return scaler, pca, kmeans, columns
 
-model, scaler, pca = load_models()
+try:
+    scaler, pca, model, columns = load_models()
+except:
+    st.error("❌ Missing model files (.joblib)")
+    st.stop()
 
-# ===============================
-# COUNTRY SELECT
-# ===============================
-country = st.selectbox("🌐 Select Country", df["Country"])
-row = df[df["Country"] == country]
+# =========================
+# MAIN APP
+# =========================
+if uploaded_file:
 
-# ===============================
-# 🔥 EXACT FEATURE MATCH (CRITICAL)
-# ===============================
+    # =========================
+    # READ FILE
+    # =========================
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
 
-# Get expected number of features
-expected_features = scaler.n_features_in_
+    if "Country" not in df.columns:
+        st.error("Dataset must contain 'Country' column")
+        st.stop()
 
-# Drop Country
-features = df.drop(columns=["Country"], errors="ignore")
+    country_names = df["Country"]
 
-# Convert to numeric
-features = features.apply(pd.to_numeric, errors='coerce')
+    # =========================
+    # CLEAN DATA (NUMERIC SAFE)
+    # =========================
+    df_clean = df.drop("Country", axis=1).copy()
 
-# Fill missing
-features = features.fillna(features.mean())
+    # Align columns
+    for col in columns:
+        if col not in df_clean.columns:
+            df_clean[col] = np.nan
 
-# Convert to numpy
-features_array = features.values
+    df_clean = df_clean[columns]
 
-# 🔥 MATCH FEATURE COUNT
-current_features = features_array.shape[1]
+    # Convert to numeric
+    for col in df_clean.columns:
+        temp = df_clean[col].astype(str)\
+            .str.replace('$', '', regex=False)\
+            .str.replace(',', '', regex=False)\
+            .str.strip()
 
-if current_features > expected_features:
-    features_array = features_array[:, :expected_features]
+        if temp.str.contains('%').any():
+            df_clean[col] = pd.to_numeric(
+                temp.str.replace('%', '', regex=False),
+                errors='coerce'
+            ) / 100
+        else:
+            df_clean[col] = pd.to_numeric(temp, errors='coerce')
 
-elif current_features < expected_features:
-    import numpy as np
-    padding = np.zeros((features_array.shape[0], expected_features - current_features))
-    features_array = np.hstack((features_array, padding))
+    # =========================
+    # TRANSFORM PIPELINE
+    # =========================
+    from sklearn.impute import SimpleImputer
+    imputer = SimpleImputer(strategy="mean")
 
-# ===============================
-# TRANSFORM + PREDICT
-# ===============================
-scaled = scaler.transform(features_array)
-pca_data = pca.transform(scaled)
+    X_scaled = scaler.transform(df_clean)
+    X_imputed = imputer.fit_transform(X_scaled)
+    X_pca = pca.transform(X_imputed)
 
-clusters = model.predict(pca_data)
-df["Cluster"] = clusters
+    clusters = model.predict(X_pca)
 
-cluster_id = df[df["Country"] == country]["Cluster"].values[0]
+    # Add cluster to df (for display)
+    df["Cluster"] = clusters
 
-# ===============================
-# DISPLAY
-# ===============================
-st.subheader(f"📍 {country}")
-st.write(f"Cluster Assigned: **{cluster_id}**")
+    # =========================
+    # COUNTRY SELECTOR
+    # =========================
+    st.markdown("## 📊 Per-Country Detail Card")
 
-# ===============================
-# METRICS
-# ===============================
-st.subheader("📊 Key Indicators")
+    selected_country = st.selectbox(
+        "Select country to inspect:",
+        country_names
+    )
 
-cols = st.columns(3)
-display_cols = df.columns[1:10]
+    # Get row index safely
+    row_index = df[df["Country"] == selected_country].index[0]
 
-for i, col in enumerate(display_cols):
-    value = row[col].values[0] if col in row else None
+    # Clean numeric row
+    row_clean = df_clean.iloc[row_index]
 
-    try:
-        value = float(value)
-        value = round(value, 2)
-    except:
-        value = "N/A"
+    # =========================
+    # HEADER CARD
+    # =========================
+    st.markdown(f"""
+    <div class="card">
+        <h3>🌐 {selected_country}</h3>
+        <p>Cluster assigned: <b>{int(df.loc[row_index, 'Cluster'])}</b></p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with cols[i % 3]:
-        st.metric(col, value)
+    # =========================
+    # METRICS GRID
+    # =========================
+    st.markdown("### Key Indicators")
 
-# ===============================
-# CHARTS
-# ===============================
-st.subheader("📈 Country vs Cluster Mean")
+    cols = st.columns(4)
 
-cluster_mean = df[df["Cluster"] == cluster_id][display_cols].mean(numeric_only=True)
+    for i, col_name in enumerate(df_clean.columns[:8]):
+        with cols[i % 4]:
+            st.markdown(f"""
+            <div class="card">
+                <p>{col_name}</p>
+                <div class="metric">{round(row_clean[col_name], 2)}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-comparison = pd.DataFrame({
-    "Country": pd.to_numeric(row[display_cols].iloc[0], errors='coerce'),
-    "Cluster Mean": cluster_mean
-})
+    # =========================
+    # CLUSTER MEAN COMPARISON (FIXED)
+    # =========================
+    st.markdown("## 📉 Country vs Cluster Mean")
 
-st.bar_chart(comparison)
+    cluster_id = df.loc[row_index, "Cluster"]
 
-st.subheader("📉 Cluster Distribution")
-st.bar_chart(df["Cluster"].value_counts())
+    # Use CLEAN DATA (IMPORTANT FIX)
+    cluster_data = df_clean.copy()
+    cluster_data["Cluster"] = clusters
+
+    cluster_mean = cluster_data[cluster_data["Cluster"] == cluster_id].mean()
+
+    # =========================
+    # PLOT
+    # =========================
+    features_to_plot = df_clean.columns[:5]
+
+    fig, ax = plt.subplots()
+
+    ax.bar(features_to_plot, row_clean[features_to_plot], label="Country")
+    ax.bar(features_to_plot, cluster_mean[features_to_plot], alpha=0.5, label="Cluster Mean")
+
+    plt.xticks(rotation=45)
+    plt.legend()
+
+    st.pyplot(fig)
+
+else:
+    st.info("⬅️ Upload dataset to begin")
