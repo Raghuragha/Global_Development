@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import numpy as np
 
 # ===============================
 # PAGE CONFIG
@@ -37,32 +38,30 @@ country = st.selectbox("🌐 Select Country", df['Country'])
 row = df[df['Country'] == country]
 
 # ===============================
-# PREPARE FEATURES (BULLETPROOF)
+# PREPARE FEATURES (ULTIMATE FIX)
 # ===============================
 
-# Ensure ALL required columns exist
+# Ensure all required columns exist
 for col in feature_columns:
     if col not in df.columns:
-        df[col] = 0  # add missing column
+        df[col] = 0
 
 # Keep exact order
 features = df[feature_columns].copy()
 
-# Convert safely to numeric (DO NOT DROP columns)
-for col in features.columns:
-    features[col] = pd.to_numeric(features[col], errors='coerce')
+# Convert safely to numeric
+features = features.apply(pd.to_numeric, errors='coerce')
 
-# Fill missing values column-wise
-for col in features.columns:
-    features[col].fillna(features[col].mean(), inplace=True)
+# Fill missing values
+features = features.fillna(features.mean())
 
-# FINAL safety (no NaN allowed)
-features = features.fillna(0)
+# 🔥 CRITICAL FIX (FORCE NUMPY)
+features_array = np.array(features)
 
 # ===============================
 # TRANSFORM & PREDICT
 # ===============================
-scaled = scaler.transform(features)
+scaled = scaler.transform(features_array)   # ✅ FIXED
 pca_data = pca.transform(scaled)
 
 clusters = model.predict(pca_data)
@@ -101,7 +100,6 @@ for i, col in enumerate(feature_columns[:9]):
 st.subheader("📈 Country vs Cluster Mean")
 
 cluster_mean = df[df['Cluster'] == cluster_id][feature_columns].mean(numeric_only=True)
-
 country_values = row[feature_columns].iloc[0]
 
 comparison = pd.DataFrame({
