@@ -37,21 +37,34 @@ country = st.selectbox("🌐 Select Country", df['Country'])
 row = df[df['Country'] == country]
 
 # ===============================
-# PREPARE FEATURES (FINAL FIX)
+# PREPARE FEATURES (BULLETPROOF)
 # ===============================
-features = df[feature_columns]
 
-# Convert everything to numeric (handles hidden string issues)
-features = features.apply(pd.to_numeric, errors='coerce')
+# Ensure ALL required columns exist
+for col in feature_columns:
+    if col not in df.columns:
+        df[col] = 0  # add missing column
 
-# Fill missing values
-features = features.fillna(features.mean())
+# Keep exact order
+features = df[feature_columns].copy()
 
-# Transform
+# Convert safely to numeric (DO NOT DROP columns)
+for col in features.columns:
+    features[col] = pd.to_numeric(features[col], errors='coerce')
+
+# Fill missing values column-wise
+for col in features.columns:
+    features[col].fillna(features[col].mean(), inplace=True)
+
+# FINAL safety (no NaN allowed)
+features = features.fillna(0)
+
+# ===============================
+# TRANSFORM & PREDICT
+# ===============================
 scaled = scaler.transform(features)
 pca_data = pca.transform(scaled)
 
-# Predict clusters
 clusters = model.predict(pca_data)
 df['Cluster'] = clusters
 
@@ -72,6 +85,7 @@ cols = st.columns(3)
 
 for i, col in enumerate(feature_columns[:9]):
     value = row[col].values[0] if col in row else None
+
     try:
         value = float(value)
         value = round(value, 2)
