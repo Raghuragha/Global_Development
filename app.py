@@ -6,10 +6,9 @@ import numpy as np
 # ===============================
 # PAGE CONFIG
 # ===============================
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Global Development Clustering", layout="wide")
 
-st.title("🌍 Global Dev Clustering")
-st.subheader("Unsupervised ML Project")
+st.title("🌍 Global Development Clustering Dashboard")
 
 # ===============================
 # LOAD DATA
@@ -25,64 +24,79 @@ df = load_data()
 # ===============================
 @st.cache_resource
 def load_models():
-    model = joblib.load("kmeans_model.joblib")
-    scaler = joblib.load("scaler.joblib")
-    pca = joblib.load("pca.joblib")
-    return model, scaler, pca
+    return (
+        joblib.load("kmeans_model.joblib"),
+        joblib.load("scaler.joblib"),
+        joblib.load("pca.joblib")
+    )
 
 model, scaler, pca = load_models()
 
 # ===============================
-# SIDEBAR
+# SELECT COUNTRY
 # ===============================
-st.sidebar.header("Upload Dataset")
-uploaded_file = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
-
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+country = st.selectbox("🌐 Select Country", df["Country"])
+row = df[df["Country"] == country]
 
 # ===============================
-# COUNTRY SELECT
-# ===============================
-country = st.selectbox("Select country to inspect", df['Country'])
-row = df[df['Country'] == country]
-
-# ===============================
-# ✅ EXACT TRAINING PIPELINE (FIX)
+# 🔥 ROBUST FEATURE PIPELINE
 # ===============================
 
-# Step 1: Drop same column
-features = df.drop(columns=['Country'], errors='ignore')
+# Step 1: Drop non-feature column
+features = df.drop(columns=["Country"], errors="ignore")
 
 # Step 2: Convert to numeric
-features = features.apply(pd.to_numeric, errors='coerce')
+features = features.apply(pd.to_numeric, errors="coerce")
 
-# Step 3: Fill missing values
+# Step 3: Fill missing
 features = features.fillna(features.mean())
 
-# Step 4: Convert to numpy (IMPORTANT)
+# Step 4: Convert to numpy
 features_array = features.values
 
 # ===============================
-# TRANSFORM + PREDICT
+# 🔥 MATCH FEATURE COUNT (CRITICAL FIX)
+# ===============================
+expected = scaler.n_features_in_
+
+current = features_array.shape[1]
+
+if current > expected:
+    # Trim extra columns
+    features_array = features_array[:, :expected]
+
+elif current < expected:
+    # Add missing columns as zeros
+    padding = np.zeros((features_array.shape[0], expected - current))
+    features_array = np.hstack((features_array, padding))
+
+# ===============================
+# TRANSFORM
 # ===============================
 scaled = scaler.transform(features_array)
 pca_data = pca.transform(scaled)
 
+# ===============================
+# PREDICT
+# ===============================
 clusters = model.predict(pca_data)
-df['Cluster'] = clusters
+df["Cluster"] = clusters
 
-cluster_id = df[df['Country'] == country]['Cluster'].values[0]
+cluster_id = df[df["Country"] == country]["Cluster"].values[0]
 
 # ===============================
-# DISPLAY METRICS
+# DISPLAY
 # ===============================
-st.markdown(f"### 🌐 {country}")
-st.write(f"Cluster assigned: **{cluster_id}**")
+st.subheader(f"📍 {country}")
+st.write(f"Cluster Assigned: **{cluster_id}**")
 
-col1, col2, col3 = st.columns(3)
+# ===============================
+# METRICS
+# ===============================
+st.subheader("📊 Key Indicators")
 
-display_cols = features.columns[:9]
+cols = st.columns(3)
+display_cols = df.columns[1:10]
 
 for i, col in enumerate(display_cols):
     value = row[col].values[0] if col in row else None
@@ -93,24 +107,28 @@ for i, col in enumerate(display_cols):
     except:
         value = "N/A"
 
-    with [col1, col2, col3][i % 3]:
+    with cols[i % 3]:
         st.metric(col, value)
 
 # ===============================
-# COMPARISON GRAPH
+# COMPARISON
 # ===============================
-cluster_mean = df[df['Cluster'] == cluster_id][display_cols].mean(numeric_only=True)
+st.subheader("📈 Country vs Cluster Mean")
+
+cluster_mean = df[df["Cluster"] == cluster_id][display_cols].mean(numeric_only=True)
 
 comparison = pd.DataFrame({
-    "Country": pd.to_numeric(row[display_cols].iloc[0], errors='coerce'),
+    "Country": pd.to_numeric(row[display_cols].iloc[0], errors="coerce"),
     "Cluster Mean": cluster_mean
 })
 
-st.subheader("📊 Country vs Cluster Mean")
 st.bar_chart(comparison)
 
 # ===============================
-# CLUSTER DISTRIBUTION
+# DISTRIBUTION
 # ===============================
-st.subheader("Cluster Distribution")
-st.bar_chart(df['Cluster'].value_counts())
+st.subheader("📉 Cluster Distribution")
+st.bar_chart(df["Cluster"].value_counts())
+
+st.markdown("---")
+st.caption("KMeans + PCA + Streamlit")
