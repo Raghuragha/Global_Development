@@ -34,22 +34,24 @@ model, scaler, pca, feature_columns = load_models()
 # COUNTRY SELECTION
 # ===============================
 country = st.selectbox("🌐 Select Country", df['Country'])
-
 row = df[df['Country'] == country]
 
 # ===============================
-# PREPARE FEATURES (FIXED)
+# PREPARE FEATURES (FINAL FIX)
 # ===============================
 features = df[feature_columns]
 
-# Handle missing values
+# Convert everything to numeric (handles hidden string issues)
+features = features.apply(pd.to_numeric, errors='coerce')
+
+# Fill missing values
 features = features.fillna(features.mean())
 
 # Transform
 scaled = scaler.transform(features)
 pca_data = pca.transform(scaled)
 
-# Predict
+# Predict clusters
 clusters = model.predict(pca_data)
 df['Cluster'] = clusters
 
@@ -69,21 +71,27 @@ st.subheader("📊 Key Indicators")
 cols = st.columns(3)
 
 for i, col in enumerate(feature_columns[:9]):
+    value = row[col].values[0] if col in row else None
+    try:
+        value = float(value)
+        value = round(value, 2)
+    except:
+        value = "N/A"
+
     with cols[i % 3]:
-        st.metric(
-            label=col,
-            value=round(row[col].values[0], 2)
-        )
+        st.metric(label=col, value=value)
 
 # ===============================
 # COMPARISON GRAPH
 # ===============================
 st.subheader("📈 Country vs Cluster Mean")
 
-cluster_mean = df[df['Cluster'] == cluster_id][feature_columns].mean()
+cluster_mean = df[df['Cluster'] == cluster_id][feature_columns].mean(numeric_only=True)
+
+country_values = row[feature_columns].iloc[0]
 
 comparison = pd.DataFrame({
-    "Country": row.iloc[0][feature_columns],
+    "Country": pd.to_numeric(country_values, errors='coerce'),
     "Cluster Mean": cluster_mean
 })
 
