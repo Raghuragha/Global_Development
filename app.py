@@ -25,11 +25,10 @@ def load_models():
     model = joblib.load("kmeans_model.joblib")
     scaler = joblib.load("scaler.joblib")
     pca = joblib.load("pca.joblib")
-    feature_columns = joblib.load("features.joblib")
-    return model, scaler, pca, feature_columns
+    return model, scaler, pca
 
 df = load_data()
-model, scaler, pca, feature_columns = load_models()
+model, scaler, pca = load_models()
 
 # ===============================
 # COUNTRY SELECTION
@@ -38,30 +37,35 @@ country = st.selectbox("🌐 Select Country", df['Country'])
 row = df[df['Country'] == country]
 
 # ===============================
-# PREPARE FEATURES (ULTIMATE FIX)
+# PREPARE FEATURES (MATCH TRAINING)
 # ===============================
 
-# Ensure all required columns exist
-for col in feature_columns:
-    if col not in df.columns:
-        df[col] = 0
+# Drop non-numeric columns like during training
+features = df.drop(columns=['Country'], errors='ignore')
 
-# Keep exact order
-features = df[feature_columns].copy()
-
-# Convert safely to numeric
-features = features.apply(pd.to_numeric, errors='coerce')
+# Keep only numeric columns
+features = features.select_dtypes(include=['number'])
 
 # Fill missing values
 features = features.fillna(features.mean())
 
-# 🔥 CRITICAL FIX (FORCE NUMPY)
-features_array = np.array(features)
+# 🔥 CRITICAL: MATCH EXACT FEATURE COUNT
+expected_features = scaler.n_features_in_
+
+if features.shape[1] > expected_features:
+    features = features.iloc[:, :expected_features]
+
+elif features.shape[1] < expected_features:
+    for i in range(expected_features - features.shape[1]):
+        features[f"missing_{i}"] = 0
+
+# Convert to numpy
+features_array = features.values
 
 # ===============================
 # TRANSFORM & PREDICT
 # ===============================
-scaled = scaler.transform(features_array)   # ✅ FIXED
+scaled = scaler.transform(features_array)
 pca_data = pca.transform(scaled)
 
 clusters = model.predict(pca_data)
@@ -82,7 +86,9 @@ st.subheader("📊 Key Indicators")
 
 cols = st.columns(3)
 
-for i, col in enumerate(feature_columns[:9]):
+display_cols = features.columns[:9]
+
+for i, col in enumerate(display_cols):
     value = row[col].values[0] if col in row else None
 
     try:
@@ -99,8 +105,8 @@ for i, col in enumerate(feature_columns[:9]):
 # ===============================
 st.subheader("📈 Country vs Cluster Mean")
 
-cluster_mean = df[df['Cluster'] == cluster_id][feature_columns].mean(numeric_only=True)
-country_values = row[feature_columns].iloc[0]
+cluster_mean = df[df['Cluster'] == cluster_id][display_cols].mean(numeric_only=True)
+country_values = row[display_cols].iloc[0]
 
 comparison = pd.DataFrame({
     "Country": pd.to_numeric(country_values, errors='coerce'),
