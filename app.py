@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import joblib
-import numpy as np
 
 # ===============================
 # PAGE CONFIG
@@ -24,61 +23,55 @@ df = load_data()
 # ===============================
 @st.cache_resource
 def load_models():
-    return (
-        joblib.load("kmeans_model.joblib"),
-        joblib.load("scaler.joblib"),
-        joblib.load("pca.joblib")
-    )
+    model = joblib.load("kmeans_model.joblib")
+    scaler = joblib.load("scaler.joblib")
+    pca = joblib.load("pca.joblib")
+    return model, scaler, pca
 
 model, scaler, pca = load_models()
 
 # ===============================
-# SELECT COUNTRY
+# COUNTRY SELECT
 # ===============================
 country = st.selectbox("🌐 Select Country", df["Country"])
 row = df[df["Country"] == country]
 
 # ===============================
-# 🔥 ROBUST FEATURE PIPELINE
+# 🔥 EXACT FEATURE MATCH (CRITICAL)
 # ===============================
 
-# Step 1: Drop non-feature column
+# Get expected number of features
+expected_features = scaler.n_features_in_
+
+# Drop Country
 features = df.drop(columns=["Country"], errors="ignore")
 
-# Step 2: Convert to numeric
-features = features.apply(pd.to_numeric, errors="coerce")
+# Convert to numeric
+features = features.apply(pd.to_numeric, errors='coerce')
 
-# Step 3: Fill missing
+# Fill missing
 features = features.fillna(features.mean())
 
-# Step 4: Convert to numpy
+# Convert to numpy
 features_array = features.values
 
-# ===============================
-# 🔥 MATCH FEATURE COUNT (CRITICAL FIX)
-# ===============================
-expected = scaler.n_features_in_
+# 🔥 MATCH FEATURE COUNT
+current_features = features_array.shape[1]
 
-current = features_array.shape[1]
+if current_features > expected_features:
+    features_array = features_array[:, :expected_features]
 
-if current > expected:
-    # Trim extra columns
-    features_array = features_array[:, :expected]
-
-elif current < expected:
-    # Add missing columns as zeros
-    padding = np.zeros((features_array.shape[0], expected - current))
+elif current_features < expected_features:
+    import numpy as np
+    padding = np.zeros((features_array.shape[0], expected_features - current_features))
     features_array = np.hstack((features_array, padding))
 
 # ===============================
-# TRANSFORM
+# TRANSFORM + PREDICT
 # ===============================
 scaled = scaler.transform(features_array)
 pca_data = pca.transform(scaled)
 
-# ===============================
-# PREDICT
-# ===============================
 clusters = model.predict(pca_data)
 df["Cluster"] = clusters
 
@@ -111,24 +104,18 @@ for i, col in enumerate(display_cols):
         st.metric(col, value)
 
 # ===============================
-# COMPARISON
+# CHARTS
 # ===============================
 st.subheader("📈 Country vs Cluster Mean")
 
 cluster_mean = df[df["Cluster"] == cluster_id][display_cols].mean(numeric_only=True)
 
 comparison = pd.DataFrame({
-    "Country": pd.to_numeric(row[display_cols].iloc[0], errors="coerce"),
+    "Country": pd.to_numeric(row[display_cols].iloc[0], errors='coerce'),
     "Cluster Mean": cluster_mean
 })
 
 st.bar_chart(comparison)
 
-# ===============================
-# DISTRIBUTION
-# ===============================
 st.subheader("📉 Cluster Distribution")
 st.bar_chart(df["Cluster"].value_counts())
-
-st.markdown("---")
-st.caption("KMeans + PCA + Streamlit")
